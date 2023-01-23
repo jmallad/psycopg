@@ -16,13 +16,10 @@ from .abc import Buffer, Query, Params
 from ._enums import PyFormat
 from ._encodings import conn_encoding
 from libc.stdlib cimport malloc, free
+from libc.string cimport memset, memcpy
+from cython.unicode import PyUnicode_AsWideCharString, PyUnicode_GET_LENGTH,
+PyUnicode_DATA
 
-cdef extern from "Python.h":
-    Py_ssize_t PyUnicode_GET_LENGTH(PyObject *o)
-    void *PyUnicode_DATA(PyObject *o)
-cdef extern from "string.h":
-    void *memset(void *s, int c, size_t n);
-    char *strerror(int errnum);
 cdef extern from "stdio.h":
     struct FILE
     int fprintf(FILE *stream, const char *format, ...);
@@ -86,6 +83,25 @@ cdef class PostgresQuery():
         self.query = b""
         self._order: Optional[List[str]] = None
 
+    cdef size_t find_close(unsigned char* query, size_t inlen) except -1:
+        
+        
+    cdef int count_placeholders(unsigned char* query, size_t inlen) except -1:
+        count = 0
+        if not query:
+            raise MemoryError("Null pointer dereference on query")
+        size_t p = 0
+        while p < inlen - 1:
+            if query[p] == '%':
+                #Check for escape
+                if query[p+1] == '%':
+                    p += 2
+                    continue
+                #Check for keyword
+                if query[p+1] == '(':
+                    size_t e = find_close(&query[p+2], inlen - (p + 2))
+            p += 1
+        
     cpdef convert(self, query: Query, vars: Optional[Params]):
         """
         Set up the query and parameters to convert.
@@ -186,7 +202,7 @@ cdef void free_lists(c_list** res, unsigned n):
 #@lru_cache()
 #Returns Tuple[bytes, List[PyFormat], Optional[List[str]], List[QueryPart]]:
 cdef tuple _query2pg(
-    c_list* parts, query: bytes, encoding: str
+    query_part** parts, query: bytes, encoding: str
 ):
     """
     Convert Python query and params into something Postgres understands.
@@ -200,16 +216,11 @@ cdef tuple _query2pg(
     """
     if not parts:
         raise MemoryError("Null pointer dereference on 'parts'")
-    cdef c_list* order = new_list()
-    cdef c_list* chunks = new_list()
-    cdef c_list* formats = new_list()
-
-    cdef c_list* resources[3]
-    resources[:] = (order, chunks, formats)
+    cdef char** order = NULL
+    cdef char** chunks = NULL
+    cdef char** formats = NULL
 
     _split_query(parts, query, encoding)
-        
-    cdef c_list* i = parts;
 
     cdef char cbuf[128] #Conversion buffer
     memset(cbuf, 0, 128)
@@ -420,7 +431,7 @@ cdef list _split_query(
         elif ph == b"% ":
             # explicit messasge for a typical error
             raise e.ProgrammingError( 
-               "incomplete placeholder: '%'; if you want to use '%' as an"
+                "incomplete placeholder: '%'; if you want to use '%' as an"
                 " operator you can double it up, i.e. use '%%'"
             )
         elif ph[-1:] not in b"sbt":
