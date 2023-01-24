@@ -70,6 +70,7 @@ cdef class PostgresQuery():
     cdef list _parts
     #New
     cdef query_part* parts
+
     
     def __cinit__(self, transformer: "Transformer"):
         self._tx = transformer
@@ -194,8 +195,8 @@ cdef void free_lists(c_list** res, unsigned n):
 #@lru_cache()
 #Returns Tuple[bytes, List[PyFormat], Optional[List[str]], List[QueryPart]]:
 cdef tuple _query2pg(
-    query_part** parts, query: bytes, encoding: str
-):
+    query_part* parts, query: bytes, encoding: str
+) except NULL:
     """
     Convert Python query and params into something Postgres understands.
 

@@ -32,48 +32,78 @@ static int find_close(unsigned char* query,
 	return -1;
 }
 
-int count_placeholders(unsigned char* query,
-		       unsigned inlen)
+enum {
+	PH_KWD = 1,
+	PH_POS = 2
+};
+
+int find_placeholder(
+	unsigned *out,
+	unsigned *outlen,
+	unsigned char* in,
+	unsigned inlen,
+	unsigned start)
 {
-	int end;
-	unsigned p = 0;
-        unsigned count = 0;
-	unsigned modes = 0; /* bit 0 for positional, bit 1 for keyword */
+	if (!out || !outlen || !in) {
+		/* Null pointer dereference */
+		return -2;
+	}
+	unsigned p = start;
 	while (p < inlen) {
-		if (query[p] == '%') {
+		if (in[p] == '%') {
 			if (p > inlen - 1) {
 				break;
 			}
 			/* Check for escape */
-			if (query[p+1] == '%') {
+			if (in[p+1] == '%') {
 				p += 2;
 				continue;
 			}
-                        /* Check for keyword */
-			if (query[p+1] == '(') {
-				end = find_close(query, inlen, p+2);
+			/* Check for keyword */
+			if (in[p+1] == '(') {
+				end = find_close(in, inlen, p+2);
 				if (end < 0) {
 					/* Unclosed keyword placeholder */
 					return -1;
 				}
-				p = end + 1;
-				modes |= 1;
-				count++;
-				continue;
+				*out = p + 2;
+				*outlen = (end - 1) - (p + 2);
+				return PH_KWD;
 			}
 			/* Check for positional */
-			if (query[p+1] == 's' ||
-			    query[p+1] == 't' ||
-			    query[p+1] == 'b') {
+			if (in[p+1] == 's' ||
+			    in[p+1] == 't' ||
+			    in[p+1] == 'b') {
+				*out = p + 1;
+				*outlen = 1;
 				p += 2;
-				modes |= 2;
-				count++;
-				continue;
+				return PH_POS;
 			}
 		}
 		p++;
 	}
-	
+	return 0;
+}
+
+int count_placeholders(unsigned char* in,
+		       unsigned inlen)
+{
+	int end;
+	int ret;
+        unsigned count = 0;
+	unsigned ph = 0;
+	unsigned phlen = 0;
+	unsigned modes = 0;
+	for (ret = 1;
+	     ret > 0;
+	     ret = find_placeholder(&ph, &phlen, in, inlen, ph)) {
+		modes |= ret;
+		count++;
+	}
+	if (ret < 0) {
+		/* Malformed query */
+		return -3;
+	}
 	if (modes == 3) {
 		/* Mixed keyword and positional placeholders */
 		return -2;
