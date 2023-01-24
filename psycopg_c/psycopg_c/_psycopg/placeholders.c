@@ -1,3 +1,5 @@
+#include <string.h>
+#include <stdlib.h>
 #include "placeholders.h"
 
 static int find_close(unsigned char* query,
@@ -13,6 +15,67 @@ static int find_close(unsigned char* query,
 	}
 	
 	return -1;
+}
+
+/* Collapse %% into % */
+static int escape(unsigned char** out,
+		  unsigned* outlen,
+		  unsigned char* in,
+		  unsigned inlen)
+{
+	unsigned ip;
+	unsigned op;
+	unsigned count = 0;
+	if (!out || !outlen || !in) {
+		return ENULLPTR;
+	}
+	if (!inlen) {
+		return EEMPTY;
+	}
+	/* Count the number of escapes */
+	for (ip = 0; ip < inlen; ip++) {
+		if (in[ip] == '%') {
+			if (ip > inlen - 1) {
+				break;
+			}
+			/* Check for escape */
+			if (in[ip+1] == '%') {
+				ip += 2;
+				count++;
+				continue;
+			}
+		}
+	}
+	/* No escapes found */
+	if (!count) {
+		return SUCCESS;
+	}
+	/* Allocate the space needed for the escaped output */	
+	*outlen = inlen - count;
+	*out = malloc(*outlen);
+	if (!*out) {
+		return EALLOC;
+	}
+	memset(*out, 0, *outlen);
+	/* Write escaped output */
+	op = 0;
+	ip = 0;
+	while (ip < inlen) {
+		if (in[ip] == '%') {
+			if (ip > inlen - 1) {
+				break;
+			}
+			/* Check for escape */
+			if (in[ip+1] == '%') {
+				ip++;
+				continue;
+			}
+		}
+		(*out)[op] = in[ip];
+		op++;
+		ip++;
+	}
+	return SUCCESS;	
 }
 
 static int find_placeholder(
@@ -73,9 +136,11 @@ int count_placeholders(unsigned char* in,
 	unsigned ph = 0;
 	unsigned phlen = 0;
 	unsigned modes = 0;
-	for (ret = 1;
-	     ret > 0;
-	     ret = find_placeholder(&ph, &phlen, in, inlen, ph + phlen)) {
+	while (1) {
+		ret = find_placeholder(&ph, &phlen, in, inlen, ph + phlen);
+		if (ret <= 0) {
+			break;
+		}
 		modes |= ret;
 		count++;
 	}
@@ -102,6 +167,7 @@ int search_placeholders(struct query_part* out,
 	if (!outlen || !inlen) {
 		return EEMPTY;
 	}
+	return 0;
 }
 
 const char* placeholder_strerror(int err)
@@ -116,7 +182,7 @@ const char* placeholder_strerror(int err)
 	case EUNCLOSED:
 		return "Unclosed keyword placeholder";
 	case EMIXEDPH:
-		return "Mixed usage of keyword and positional placeholders"
+		return "Mixed usage of keyword and positional placeholders";
 	}
 	return "Unrecognized return code";
 }
@@ -130,18 +196,28 @@ const char* placeholder_strerror(int err)
 int main(int argc,
 	 char** argv)
 {
+	unsigned char* escaped;
+	unsigned escapelen;
 	unsigned char* query = (unsigned char*)"select %s from %s %% %b";
 	unsigned inlen = strlen((char*)query);
 	int ret = count_placeholders(query, inlen);
 	fprintf(stderr, "query: %s\nplaceholders: %d\n", query, ret);
+	ret = escape(&escaped, &escapelen, query, inlen);
+	fprintf(stderr, "escaped: %s\n\n", escaped);
+	
 	query = (unsigned char*)"%(k1) %% and %% %(k2) where %(k3)";
 	inlen = strlen((char*)query);
-	ret = count_placeholders(query, inlen);
+	ret = count_placeholders(query, inlen);	
 	fprintf(stderr, "query: %s\nplaceholders: %d\n", query, ret);
+	ret = escape(&escaped, &escapelen, query, inlen);
+	fprintf(stderr, "escaped: %s\n\n", escaped);
+	
 	query = (unsigned char*)"mixed %(keyword) and %s positional %b";
 	inlen = strlen((char*)query);
 	ret = count_placeholders(query, inlen);
-	fprintf(stderr, "query: %s\nplaceholders: %d\n", query, ret);	
+	fprintf(stderr, "query: %s\nplaceholders: %d\n", query, ret);
+	ret = escape(&escaped, &escapelen, query, inlen);
+	fprintf(stderr, "escaped: %s\n\n", escaped);
 }
 
 #endif

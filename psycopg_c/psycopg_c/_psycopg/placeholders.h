@@ -11,6 +11,7 @@ enum {
 };
 
 enum {
+	SUCCESS = 0,
 	ENULLPTR = -1,
 	EALLOC   = -2,
 	EEMPTY   = -3,
