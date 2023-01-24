@@ -44,11 +44,12 @@ int find_placeholder(
 	unsigned inlen,
 	unsigned start)
 {
+	int end;
+	unsigned p = start;
 	if (!out || !outlen || !in) {
 		/* Null pointer dereference */
 		return -2;
 	}
-	unsigned p = start;
 	while (p < inlen) {
 		if (in[p] == '%') {
 			if (p > inlen - 1) {
