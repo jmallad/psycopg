@@ -1,21 +1,4 @@
-enum item_type_enum {
-    ITEM_INT = 0,
-    ITEM_STR = 1
-};
-
-union query_item {
-        int data_int;
-        void* data_bytes;
-};
-
-struct query_part {
-        void* pre;
-        unsigned pre_len;
-        union query_item item;
-        enum item_type_enum item_type;
-        unsigned data_len;
-        char format;
-};
+#include "placeholders.h"
 
 static int find_close(unsigned char* query,
 		      unsigned inlen,
@@ -32,12 +15,7 @@ static int find_close(unsigned char* query,
 	return -1;
 }
 
-enum {
-	PH_KWD = 1,
-	PH_POS = 2
-};
-
-int find_placeholder(
+static int find_placeholder(
 	unsigned *out,
 	unsigned *outlen,
 	unsigned char* in,
@@ -48,7 +26,7 @@ int find_placeholder(
 	unsigned p = start;
 	if (!out || !outlen || !in) {
 		/* Null pointer dereference */
-		return -2;
+		return ENULLPTR;
 	}
 	while (p < inlen) {
 		if (in[p] == '%') {
@@ -65,7 +43,7 @@ int find_placeholder(
 				end = find_close(in, inlen, p+2);
 				if (end < 0) {
 					/* Unclosed keyword placeholder */
-					return -1;
+					return EUNCLOSED;
 				}
 				*out = p + 2;
 				*outlen = (end - 1) - (p + 2);
@@ -103,14 +81,44 @@ int count_placeholders(unsigned char* in,
 	}
 	if (ret < 0) {
 		/* Malformed query */
-		return -3;
+		return ret;
 	}
 	if (modes == 3) {
 		/* Mixed keyword and positional placeholders */
-		return -2;
+		return EMIXEDPH;
 	}
 	
 	return count;	
+}
+
+int search_placeholders(struct query_part* out,
+			unsigned outlen,
+			unsigned char* in,
+			unsigned inlen)
+{
+	if (!out || !in) {
+		return ENULLPTR;
+	}
+	if (!outlen || !inlen) {
+		return EEMPTY;
+	}
+}
+
+const char* placeholder_strerror(int err)
+{
+	switch (err){
+	case ENULLPTR:
+		return "Null pointer dereference";
+	case EALLOC:
+		return "Dynamic allocation failure";
+	case EEMPTY:
+		return "Unexpected empty buffer";
+	case EUNCLOSED:
+		return "Unclosed keyword placeholder";
+	case EMIXEDPH:
+		return "Mixed usage of keyword and positional placeholders"
+	}
+	return "Unrecognized return code";
 }
 
 #if (PLACEHOLDER_TEST)
