@@ -97,7 +97,7 @@ int count_placeholders(unsigned char* in,
 	unsigned modes = 0;
 	for (ret = 1;
 	     ret > 0;
-	     ret = find_placeholder(&ph, &phlen, in, inlen, ph)) {
+	     ret = find_placeholder(&ph, &phlen, in, inlen, ph + phlen)) {
 		modes |= ret;
 		count++;
 	}
