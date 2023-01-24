@@ -17,11 +17,60 @@ static int find_close(unsigned char* query,
 	return -1;
 }
 
+static int find_placeholder(
+	unsigned *out,
+	unsigned *outlen,
+	unsigned char* in,
+	unsigned inlen,
+	unsigned start)
+{
+	int end;
+	unsigned p = start;
+	if (!out || !outlen || !in) {
+		/* Null pointer dereference */
+		return ENULLPTR;
+	}
+	while (p < inlen) {
+		if (in[p] == '%') {
+			if (p > inlen - 1) {
+				break;
+			}
+			/* Check for escape */
+			if (in[p+1] == '%') {
+				p += 2;
+				continue;
+			}
+			/* Check for keyword */
+			if (in[p+1] == '(') {
+				end = find_close(in, inlen, p+2);
+				if (end < 0) {
+					/* Unclosed keyword placeholder */
+					return EUNCLOSED;
+				}
+				*out = p + 2;
+				*outlen = (end - 1) - (p + 2);
+				return PH_KWD;
+			}
+			/* Check for positional */
+			if (in[p+1] == 's' ||
+			    in[p+1] == 't' ||
+			    in[p+1] == 'b') {
+				*out = p + 1;
+				*outlen = 1;
+				p += 2;
+				return PH_POS;
+			}
+		}
+		p++;
+	}
+	return 0;
+}
+
 /* Collapse %% into % */
-static int escape(unsigned char** out,
-		  unsigned* outlen,
-		  unsigned char* in,
-		  unsigned inlen)
+int escape(unsigned char** out,
+	   unsigned* outlen,
+	   unsigned char* in,
+	   unsigned inlen)
 {
 	unsigned ip;
 	unsigned op;
@@ -78,64 +127,15 @@ static int escape(unsigned char** out,
 	return SUCCESS;	
 }
 
-static int find_placeholder(
-	unsigned *out,
-	unsigned *outlen,
-	unsigned char* in,
-	unsigned inlen,
-	unsigned start)
-{
-	int end;
-	unsigned p = start;
-	if (!out || !outlen || !in) {
-		/* Null pointer dereference */
-		return ENULLPTR;
-	}
-	while (p < inlen) {
-		if (in[p] == '%') {
-			if (p > inlen - 1) {
-				break;
-			}
-			/* Check for escape */
-			if (in[p+1] == '%') {
-				p += 2;
-				continue;
-			}
-			/* Check for keyword */
-			if (in[p+1] == '(') {
-				end = find_close(in, inlen, p+2);
-				if (end < 0) {
-					/* Unclosed keyword placeholder */
-					return EUNCLOSED;
-				}
-				*out = p + 2;
-				*outlen = (end - 1) - (p + 2);
-				return PH_KWD;
-			}
-			/* Check for positional */
-			if (in[p+1] == 's' ||
-			    in[p+1] == 't' ||
-			    in[p+1] == 'b') {
-				*out = p + 1;
-				*outlen = 1;
-				p += 2;
-				return PH_POS;
-			}
-		}
-		p++;
-	}
-	return 0;
-}
-
 int count_placeholders(unsigned char* in,
 		       unsigned inlen)
 {
-	int end;
 	int ret;
         unsigned count = 0;
 	unsigned ph = 0;
 	unsigned phlen = 0;
 	unsigned modes = 0;
+	
 	while (1) {
 		ret = find_placeholder(&ph, &phlen, in, inlen, ph + phlen);
 		if (ret <= 0) {
@@ -161,11 +161,37 @@ int search_placeholders(struct query_part* out,
 			unsigned char* in,
 			unsigned inlen)
 {
+	int ret;
+	unsigned count = 0;
+	unsigned ph = 0;
+	unsigned phlen = 0;
+
 	if (!out || !in) {
 		return ENULLPTR;
 	}
 	if (!outlen || !inlen) {
 		return EEMPTY;
+	}
+	while (1) {
+		ret = find_placeholder(&ph, &phlen, in, inlen, ph + phlen);
+		if (ret <= 0) {
+			break;
+		}
+		if (count > outlen) {
+			return EBUFOV;
+		}
+		out[count].pre = &in[ph];
+		out[count].pre_len = phlen;
+		if (ret == PH_POS) {
+			/* We already verified this is in the valid set of
+			   inputs in previous call to count_placeholders */
+			out[count].format = in[ph];
+		}
+		else {
+			/* Auto format for keyword arguments */
+			out[count].format = 's';
+		}
+		count++;
 	}
 	return 0;
 }
