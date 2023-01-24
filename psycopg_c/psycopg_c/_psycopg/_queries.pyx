@@ -17,7 +17,7 @@ from ._enums import PyFormat
 from ._encodings import conn_encoding
 from libc.stdlib cimport malloc, free
 from libc.string cimport memset, memcpy
-from cython.unicode import PyUnicode_AsWideCharString, PyUnicode_GET_LENGTH,
+from cython.unicode import PyUnicode_AsWideCharString, PyUnicode_GET_LENGTH, \
 PyUnicode_DATA
 
 cdef extern from "stdio.h":
@@ -27,6 +27,10 @@ cdef extern from "stdio.h":
     FILE* stderr    
 cdef extern from "errno.h":
     int errno
+
+cdef extern from "placeholders.c":
+    int count_placeholders(unsigned char* query, unsigned inlen)
+
 cdef enum item_type_enum:
     ITEM_INT = 0,
     ITEM_STR = 1
@@ -65,7 +69,7 @@ cdef class PostgresQuery():
     #Old
     cdef list _parts
     #New
-    cdef c_list* parts
+    cdef query_part* parts
     
     def __cinit__(self, transformer: "Transformer"):
         self._tx = transformer
@@ -83,25 +87,6 @@ cdef class PostgresQuery():
         self.query = b""
         self._order: Optional[List[str]] = None
 
-    cdef size_t find_close(unsigned char* query, size_t inlen) except -1:
-        
-        
-    cdef int count_placeholders(unsigned char* query, size_t inlen) except -1:
-        count = 0
-        if not query:
-            raise MemoryError("Null pointer dereference on query")
-        size_t p = 0
-        while p < inlen - 1:
-            if query[p] == '%':
-                #Check for escape
-                if query[p+1] == '%':
-                    p += 2
-                    continue
-                #Check for keyword
-                if query[p+1] == '(':
-                    size_t e = find_close(&query[p+2], inlen - (p + 2))
-            p += 1
-        
     cpdef convert(self, query: Query, vars: Optional[Params]):
         """
         Set up the query and parameters to convert.
@@ -115,6 +100,13 @@ cdef class PostgresQuery():
             bquery = query.as_bytes(self._tx)
         else:
             bquery = query
+
+        cdef void* rawquery = PyUnicode_DATA(bquery)
+        cdef unsigned rawlen = PyUnicode_GET_LENGTH(bquery)
+        cdef int n_placeholders = count_placeholders(rawquery, rawlen)
+        self.parts = malloc(sizeof(query_part) * n_placeholders)        
+        if not parts:
+            raise MemoryError("Dynamic allocation failure")
 
         if vars is not None:
             (
