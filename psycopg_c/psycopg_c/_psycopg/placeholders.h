@@ -17,7 +17,8 @@ enum {
 	EEMPTY    = -3, /* Unexpected empty input */
 	EUNCLOSED = -4, /* Unclosed keyword placeholder */
 	EMIXEDPH  = -5, /* Mixed positional and keyword placeholders */
-	EBUFOV    = -6  /* Buffer overflow */
+	EBUFOV    = -6, /* Buffer overflow */
+	EINVALID  = -7, /* Invalid or incomplete placeholder */
 };
 
 union query_item {

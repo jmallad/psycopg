@@ -60,6 +60,8 @@ static int find_placeholder(
 				p += 2;
 				return PH_POS;
 			}
+			/* Invalid/incomplete placeholder */
+			return EINVALID;
 		}
 		p++;
 	}
@@ -186,14 +188,17 @@ int search_placeholders(struct query_part* out,
 			/* We already verified this is in the valid set of
 			   inputs in previous call to count_placeholders */
 			out[count].format = in[ph];
+			out[count].item.data_int = count;
 		}
 		else {
 			/* Auto format for keyword arguments */
 			out[count].format = 's';
+			out[count].item.data_bytes = &in[ph];
 		}
 		count++;
+		
 	}
-	return 0;
+	return SUCCESS;
 }
 
 const char* placeholder_strerror(int err)
@@ -209,6 +214,8 @@ const char* placeholder_strerror(int err)
 		return "Unclosed keyword placeholder";
 	case EMIXEDPH:
 		return "Mixed usage of keyword and positional placeholders";
+	case EINVALID:
+		return "Invalid or incomplete placeholder";
 	}
 	return "Unrecognized return code";
 }
