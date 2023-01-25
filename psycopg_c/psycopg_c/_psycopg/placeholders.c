@@ -68,16 +68,14 @@ static int find_placeholder(
 	return 0;
 }
 
-/* Collapse %% into % */
-int escape(unsigned char** out,
-	   unsigned* outlen,
-	   unsigned char* in,
-	   unsigned inlen)
+/* Returns size of input string minus any escaped percent signs */
+int escaped_len(unsigned char* in,
+		unsigned inlen)
 {
 	unsigned ip;
 	unsigned op;
 	unsigned count = 0;
-	if (!out || !outlen || !in) {
+	if (!in) {
 		return ENULLPTR;
 	}
 	if (!inlen) {
@@ -97,21 +95,27 @@ int escape(unsigned char** out,
 			}
 		}
 	}
-	/* No escapes found */
-	if (!count) {
-		return SUCCESS;
+	return inlen - count;
+}
+
+/* Collapse %% into % */
+int escape(unsigned char* out,
+	   unsigned outlen,
+	   unsigned char* in,
+	   unsigned inlen)
+{
+	unsigned ip;
+	unsigned op;
+	if (!out || !in) {
+		return ENULLPTR;
 	}
-	/* Allocate the space needed for the escaped output */	
-	*outlen = inlen - count;
-	*out = malloc(*outlen);
-	if (!*out) {
-		return EALLOC;
+	if (!outlen || !inlen) {
+		return EEMPTY;
 	}
-	memset(*out, 0, *outlen);
 	/* Write escaped output */
 	op = 0;
 	ip = 0;
-	while (ip < inlen) {
+	while (ip < inlen && op < outlen) {
 		if (in[ip] == '%') {
 			if (ip > inlen - 1) {
 				break;
@@ -122,11 +126,31 @@ int escape(unsigned char** out,
 				continue;
 			}
 		}
-		(*out)[op] = in[ip];
+		out[op] = in[ip];
 		op++;
 		ip++;
 	}
 	return SUCCESS;	
+}
+
+/* Call escape() on a dynamically allocated buffer */
+int escape_m(unsigned char** out,
+	     unsigned* outlen,
+	     unsigned char* in,
+	     unsigned inlen)
+{
+	if (!out || !in || !outlen) {
+		return ENULLPTR;
+	}
+	if (!inlen) {
+		return EEMPTY;
+	}
+	*outlen = escaped_len(in, inlen);
+	*out = malloc(*outlen);
+	if (!(*out)) {
+		return EALLOC;
+	}
+	return escape(*out, *outlen, in, inlen);
 }
 
 int count_placeholders(unsigned char* in,
@@ -231,26 +255,30 @@ int main(int argc,
 {
 	unsigned char* escaped;
 	unsigned escapelen;
+	unsigned esclen;
 	unsigned char* query = (unsigned char*)"select %s from %s %% %b";
 	unsigned inlen = strlen((char*)query);
 	int ret = count_placeholders(query, inlen);
 	fprintf(stderr, "query: %s\nplaceholders: %d\n", query, ret);
-	ret = escape(&escaped, &escapelen, query, inlen);
+	ret = escape_m(&escaped, &escapelen, query, inlen);
 	fprintf(stderr, "escaped: %s\n\n", escaped);
+	free(escaped);
 	
 	query = (unsigned char*)"%(k1) %% and %% %(k2) where %(k3)";
 	inlen = strlen((char*)query);
 	ret = count_placeholders(query, inlen);	
 	fprintf(stderr, "query: %s\nplaceholders: %d\n", query, ret);
-	ret = escape(&escaped, &escapelen, query, inlen);
+	ret = escape_m(&escaped, &escapelen, query, inlen);
 	fprintf(stderr, "escaped: %s\n\n", escaped);
+	free(escaped);
 	
 	query = (unsigned char*)"mixed %(keyword) and %s positional %b";
 	inlen = strlen((char*)query);
 	ret = count_placeholders(query, inlen);
 	fprintf(stderr, "query: %s\nplaceholders: %d\n", query, ret);
-	ret = escape(&escaped, &escapelen, query, inlen);
+	ret = escape_m(&escaped, &escapelen, query, inlen);
 	fprintf(stderr, "escaped: %s\n\n", escaped);
+	free(escaped);
 }
 
 #endif

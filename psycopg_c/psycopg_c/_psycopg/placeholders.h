@@ -35,15 +35,27 @@ struct query_part {
         char format;
 };
 
+/* Returns size of input string minus any escaped percent signs */
+int escaped_len(unsigned char* in,
+		unsigned inlen);
 /* Collapse %% into % */
-int escape(unsigned char** out,
-	   unsigned* outlen,
+int escape(unsigned char* out,
+	   unsigned outlen,
 	   unsigned char* in,
 	   unsigned inlen);
+/* Call escape() on a dynamically allocated buffer (result must be freed)*/
+int escape_m(unsigned char** out,
+	     unsigned* outlen,
+	     unsigned char* in,
+	     unsigned inlen);
+/* Count the number of placeholders in a query and verify they are used 
+   correctly */
 int count_placeholders(unsigned char* in,
 		       unsigned inlen);
+/* Build an array of query_parts from placeholders in a query */
 int search_placeholders(struct query_part* out,
 			unsigned outlen,
 			unsigned char* in,
 			unsigned inlen);
+/* Return a human-readable explanation of an error code from this module */
 const char* placeholder_strerror(int err);
