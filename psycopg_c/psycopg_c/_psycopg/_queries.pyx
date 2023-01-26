@@ -18,7 +18,7 @@ from ._encodings import conn_encoding
 from libc.stdlib cimport malloc, free
 from libc.string cimport memset, memcpy
 from cython.unicode import PyUnicode_AsWideCharString, PyUnicode_GET_LENGTH, \
-PyUnicode_DATA
+PyUnicode_DATA, PyUnicode_FromKindAndData
 
 cdef extern from "stdio.h":
     struct FILE
@@ -28,13 +28,6 @@ cdef extern from "stdio.h":
 cdef extern from "errno.h":
     int errno
 
-cdef extern from "placeholders.c":
-    int count_placeholders(unsigned char* query, unsigned inlen)
-
-cdef enum item_type_enum:
-    ITEM_INT = 0,
-    ITEM_STR = 1
-    
 cdef union query_item:
         int data_int
         void* data_bytes
@@ -47,6 +40,32 @@ cdef struct query_part:
         unsigned data_len
         char format
 
+cdef extern from "placeholders.c":
+    int escaped_len(unsigned char*, unsigned)
+    int escape(unsigned char* out,
+	   unsigned outlen,
+	   unsigned char*,
+	   unsigned inlen);
+    int escape_m(unsigned char** out,
+	     unsigned* outlen,
+	     unsigned char*,
+	     unsigned inlen);
+    int count_placeholders(unsigned char*,
+		       unsigned inlen);
+    int search_placeholders(query_part* out,
+			unsigned outlen,
+			unsigned char*,
+			unsigned inlen);
+    const char* placeholder_strerror(int err);
+
+cdef enum item_type_enum:
+    ITEM_INT = 0,
+    ITEM_STR = 1
+    
+c_exc_types = {
+    SUCCESS
+}
+        
 class QueryPart(NamedTuple):
     pre: bytes
     item: Union[int, str]
@@ -63,7 +82,7 @@ cdef class PostgresQuery():
     cdef tuple types
     cdef list _want_formats
     cdef list formats
-    cdef object _encoding
+    cdef str _encoding
     cdef list _order
 
     #Old
@@ -102,19 +121,39 @@ cdef class PostgresQuery():
         else:
             bquery = query
 
+        #Get raw pointer to python string, and length in bytes
         cdef void* rawquery = PyUnicode_DATA(bquery)
         cdef unsigned rawlen = PyUnicode_GET_LENGTH(bquery)
+        #Count number of placeholders in the string
         cdef int n_placeholders = count_placeholders(rawquery, rawlen)
+        #Error message objects
+        cdef char* errmsg
+        cdef str errobj
+        #Allocate array for query parts
         self.parts = malloc(sizeof(query_part) * n_placeholders)        
         if not parts:
             raise MemoryError("Dynamic allocation failure")
-
+        #Split query into the array of query parts
+        cdef int ret = _split_query(self.parts,
+                           n_placeholders,
+                           rawquery,
+                           rawlen,
+                           self._encoding)
+        if ret < 0:
+            errmsg = placeholder_strerror(ret);
+            errobj = PyUnicode_FromKindAndData(PyUnicode_1BYTE_KIND,
+                                                        strlen(errmsg))
+            raise ValueError(f"Error parsing query: {errobj}",)
+        #Convert array back to string here, in Postgres format
+        #...
+        #Un-escape double percents
+        #...
         if vars is not None:
             (
                 self.query,
                 self._want_formats,
                 self._order,
-            ) = _query2pg(self.parts, bquery, self._encoding)
+            ) = _query2pg(self.parts, n_placeholders, bquery, self._encoding)
         else:
             self.query = bquery
             self._want_formats = self._order = None
@@ -185,17 +224,10 @@ cdef class PostgresClientQuery(PostgresQuery):
         else:
             self.params = None
 
-cdef void free_lists(c_list** res, unsigned n):
-    cdef unsigned i = 0;
-    if not res:
-        return
-    while i < n:
-        free_list(res[i])
-
 #@lru_cache()
 #Returns Tuple[bytes, List[PyFormat], Optional[List[str]], List[QueryPart]]:
 cdef tuple _query2pg(
-    query_part* parts, query: bytes, encoding: str
+    query_part* parts, unsigned n_parts, query, encoding: str
 ) except NULL:
     """
     Convert Python query and params into something Postgres understands.
@@ -213,7 +245,7 @@ cdef tuple _query2pg(
     cdef char** chunks = NULL
     cdef char** formats = NULL
 
-    _split_query(parts, query, encoding)
+
 
     cdef char cbuf[128] #Conversion buffer
     memset(cbuf, 0, 128)
@@ -364,92 +396,17 @@ _re_placeholder = re.compile(
         """
 )
 
-#Returns List[QueryPart]
 cdef list _split_query(
-    c_list* out, 
-    query: bytes,
+    query_part* out,
+    unsigned n_parts,
+    char* query,
+    unsigned querylen,
     encoding: str = "ascii",
     collapse_double_percent: bool = True
 ):
-    parts: List[Tuple[bytes, Optional[Match[bytes]]]] = []
-    cdef unsigned cur = 0
-
-    # pairs [(fragment, match], with the last match None
-    m = None
-    for m in _re_placeholder.finditer(query):
-        pre = query[cur : m.span(0)[0]]
-        parts.append((pre, m))
-        cur = m.span(0)[1]
-    if m:
-        parts.append((query[cur:], None))
-    else:
-        parts.append((query, None))
-
-    cdef query_part* qp;
-    
-    # drop the "%%", validate
-    cdef unsigned i = 0
-    phtype = None
-    while i < len(parts):
-        pre, m = parts[i]
-        if m is None:
-            # last part
-            qp = <query_part*>malloc(sizeof(query_part))
-            if not qp:
-                raise MemoryError("Dynamic allocation failure")
-            qp.pre = PyUnicode_DATA(pre)
-            qp.pre_len = PyUnicode_GET_LENGTH(pre)
-            qp.item.data_int = 0
-            #data_len only used when item.data_bytes is populated
-            qp.data_len = 0
-            qp.format = 's'
-            list_append(out, qp, sizeof(query_part))
-            break
-
-        ph = m.group(0)
-        if ph == b"%%":
-            # unescape '%%' to '%' if necessary, then merge the parts
-            if collapse_double_percent:
-                ph = b"%"
-            pre1, m1 = parts[i + 1]
-            parts[i + 1] = (pre + ph + pre1, m1)
-            del parts[i]
-            continue
-
-        if ph == b"%(":
-            raise e.ProgrammingError(
-                "incomplete placeholder:"
-                f" '{query[m.span(0)[0]:].split()[0].decode(encoding)}'"
-            )
-        elif ph == b"% ":
-            # explicit messasge for a typical error
-            raise e.ProgrammingError( 
-                "incomplete placeholder: '%'; if you want to use '%' as an"
-                " operator you can double it up, i.e. use '%%'"
-            )
-        elif ph[-1:] not in b"sbt":
-            raise e.ProgrammingError(
-                "only '%s', '%b', '%t' are allowed as placeholders, got"
-                f" '{m.group(0).decode(encoding)}'"
-            )
-
-        # Index or name
-        item: Union[int, str]
-        item = m.group(1).decode(encoding) if m.group(1) else i
-
-        if not phtype:
-            phtype = type(item)
-        elif phtype is not type(item):
-            raise e.ProgrammingError(
-                "positional and named placeholders cannot be mixed"
-            )
-
-        format = _ph_to_fmt[ph[-1:]]
-        rv.append(QueryPart(pre, item, format))
-        i += 1
-
-    return rv
-
+    #Parse placeholders into output array
+    cdef int ret = search_placeholders(out, n_parts, query, querylen);
+    return ret
 
 _ph_to_fmt = {
     b"s": PyFormat.AUTO,

@@ -213,11 +213,12 @@ int search_placeholders(struct query_part* out,
 			   inputs in previous call to count_placeholders */
 			out[count].format = in[ph];
 			out[count].item.data_int = count;
+			out[count].item_type = ITEM_INT;
 		}
 		else {
 			/* Auto format for keyword arguments */
 			out[count].format = 's';
-			out[count].item.data_bytes = &in[ph];
+			out[count].item_type = ITEM_STR;
 		}
 		count++;
 		

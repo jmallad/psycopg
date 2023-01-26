@@ -5,12 +5,12 @@ enum {
     ITEM_STR = 1
 };
 
-enum {
+enum placeholder_types {
 	PH_KWD = 1, /* Keyword placeholder */
 	PH_POS = 2  /* Positional placeholder */
 };
 
-enum {
+enum error_codes {
 	SUCCESS   = 0,  /* No error */
 	ENULLPTR  = -1, /* Null pointer dereference */
 	EALLOC    = -2, /* Dynamic allocation failure */
