@@ -396,7 +396,7 @@ _re_placeholder = re.compile(
         """
 )
 
-cdef list _split_query(
+cdef int _split_query(
     query_part* out,
     unsigned n_parts,
     char* query,
